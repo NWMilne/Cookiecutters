@@ -1,9 +1,9 @@
-# Dynamics of foraging interactions between cookiecutter sharks (Isistius spp.) and short-finned pilot whales (Globicephala macrorhynchus) in Hawaiʻi
+# Dynamics of foraging interactions between cookiecutter sharks (_Isistius spp._) and short-finned pilot whales (_Globicephala macrorhynchus_) in Hawaiʻi
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.12733235.svg)](https://doi.org/10.5281/zenodo.12733235)
 
 
 ## Project summary
-This project investigates the foraging patterns of cookiecutter sharks (<em> (Isistius spp.) </em>) on short-finned pilot whales (<em> (Globicephala macrorhynchus) </em>)  around the Hawaiian Islands. Utilizing photo-identification data from 2003-2012, the study analyzes the spatial and temporal distribution of shark bites on pilot whales. The findings suggest seasonal migrations and dietary shifts in cookiecutter sharks influenced by factors such as lunar phases and sea surface temperature.
+This project investigates the foraging patterns of cookiecutter sharks (_Isistius spp._) on short-finned pilot whales (_Globicephala macrorhynchus_)  around the Hawaiian Islands. Utilizing photo-identification data from 2003-2012, the study analyzes the spatial and temporal distribution of shark bites on pilot whales. The findings suggest seasonal migrations and dietary shifts in cookiecutter sharks influenced by factors such as lunar phases and sea surface temperature.
 
 The study was conducted off the leeward (western) side of Hawaiʻi Island, covering approximately 2500 km², with depths ranging from shallow coastal waters to about 5000 meters.
 From 2003 to 2012, data were collected during research surveys and opportunistic sightings by the Wild Whale Research Foundation. During these surveys, groups of short-finned pilot whales were approached to confirm species, take photos for individual identification, and collect sighting data, including date, GPS location, and group size. Efforts were made to photograph both sides of each individual, although field conditions sometimes limited this. Photos were then sorted by individual using unique natural markings on the dorsal fin and compared to an existing photo-identification catalogue.
