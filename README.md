@@ -1,4 +1,6 @@
 # Dynamics of foraging interactions between cookiecutter sharks (Isistius spp.) and short-finned pilot whales (Globicephala macrorhynchus) in Hawaiʻi
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.12733235.svg)](https://doi.org/10.5281/zenodo.12733235)
+
 
 ## Project summary
 This project investigates the foraging patterns of cookiecutter sharks (<em> (Isistius spp.) </em>) on short-finned pilot whales (<em> (Globicephala macrorhynchus) </em>)  around the Hawaiian Islands. Utilizing photo-identification data from 2003-2012, the study analyzes the spatial and temporal distribution of shark bites on pilot whales. The findings suggest seasonal migrations and dietary shifts in cookiecutter sharks influenced by factors such as lunar phases and sea surface temperature.
