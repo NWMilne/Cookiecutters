@@ -382,7 +382,23 @@ ratio_results <- ggarrange(R1,R4, ncol = 2, nrow = 1)
 annotate_figure(ratio_results,
                 left = text_grob("Ratio of sightings to fresh bites", color = "black", rot =90))
 
+##### should body be an offset #####
+# Convert Bite.Confirmed to a binary variable
+bites <- bites %>%
+  mutate(Bite_Confirmed = ifelse(Bite.Confirmed == "Yes", 1, 0))
 
+# Summary statistics for the percentage of body observed and presence of bites, does this need to be an offset?
+summary(bites$body)
+summary(bites$Bite_Confirmed)
+visable <- glm(Bite_Confirmed ~ body, family = binomial, data = bites)
+summary(visable)
+
+ggplot(bites, aes(x = body, y = Bite_Confirmed)) +
+  geom_jitter(width = 0.02, height = 0.02, alpha = 0.5) +
+  geom_smooth(method = "glm", method.args = list(family = "binomial"), se = TRUE) +
+  labs(x = "Percentage of Body Observed", y = "Probability of Bite Presence",
+       title = "Relationship between Body Percentage Observed and Bite Presence") +
+  theme_minimal()
 ```
 
 #predict bite location
@@ -426,99 +442,78 @@ body <- -log(bites$body)
 year <- bites$Date.year
 lunar_illum <- bites$lunar.illumin
 
-Gmm1 <-   gamm4(fresh ~ 
-                 s(temp),
+Gmm1 <-   gamm4(fresh ~ s(temp),
     offset(body),
         random = ~ (1 | cluster),
     family = binomial(link = "cloglog"),
-    data = bites
-  )
+    data = bites)
 summary(Gmm1$gam)
 anova(Gmm1$gam)
 draw(Gmm1$gam)
 
-Gmm1a <-   gamm4(fresh ~ 
-                 s(day),
+Gmm1a <-   gamm4(fresh ~ s(day),
         offset(body),
             random = ~ (1 | cluster),
         family = binomial(link = "cloglog"),
-    data = bites
-  )
+    data = bites)
 summary(Gmm1a$gam)
 anova(Gmm1a$gam)
 draw(Gmm1a$gam)
 
-Gmm1b <-   gamm4(fresh ~ 
-                 s(lunar_illum),
+Gmm1b <-   gamm4(fresh ~ s(lunar_illum),
         offset(body),
             random = ~ (1 | cluster),
         family = binomial(link = "cloglog"),
-    data = bites
-  )
+    data = bites)
 summary(Gmm1b$gam)
 anova(Gmm1b$gam)
 draw(Gmm1b$gam)
 
-Gmm1c <-   gamm4(fresh ~ 
-                 s(day) + temp,
+Gmm1c <-   gamm4(fresh ~ s(day) + temp,
         offset(body),
         random = ~ (1 | cluster),
     family = binomial(link = "cloglog"),
-    data = bites
-  )
+    data = bites)
 
 summary(Gmm1c$gam)
 anova(Gmm1c$gam)
 draw(Gmm1c$gam)
 
-Gmm1d <-   gamm4(fresh ~ 
-                 s(day) + s(lunar_illum),
+Gmm1d <-   gamm4(fresh ~ s(day) + s(lunar_illum),
         offset(body),
         random = ~ (1 | cluster),
     family = binomial(link = "cloglog"),
-    data = bites
-  )
+    data = bites)
 
 summary(Gmm1d$gam)
 anova(Gmm1d$gam)
 draw(Gmm1d$gam)
 
-Gmm1e <-   gamm4(fresh ~ 
-                 temp + s(lunar_illum),
+Gmm1e <-   gamm4(fresh ~ temp + s(lunar_illum),
         offset(body),
         random = ~ (1 | cluster),
     family = binomial(link = "cloglog"),
-    data = bites
-  )
+    data = bites)
 
 summary(Gmm1e$gam)
 anova(Gmm1e$gam)
 draw(Gmm1e$gam)
 
-Gmm1f <-   gamm4(fresh ~ 
-                 s(day) + s(lunar_illum) + temp,
+Gmm1f <-   gamm4(fresh ~ s(day) + s(lunar_illum) + temp,
     random = ~ (1 | cluster),
     offset(body),
     family = binomial(link = "cloglog"),
-    data = bites
-  )
+    data = bites)
 
 summary(Gmm1f$gam)
 anova(Gmm1f$gam)
 draw(Gmm1f$gam)
 
-
-
-######################################################
-
-Gmm2 <-
-  gamm4(
-    fresh ~ temp + s(day) + s(lunar_illum, k = 8),
+Gmm2 <- gamm4(fresh ~ temp + s(day) + s(lunar_illum, k = 8),
     random = ~ (1 | cluster),
     offset(body),
     family = binomial(link = "cloglog"),
-    data = bites
-  ) 
+    data = bites) 
 summary(Gmm2$gam)
 anova(Gmm2$gam)
 draw(Gmm2$gam)
@@ -536,56 +531,111 @@ mod.names <- c("temp", "day", "lunar", "day.temp", "day.lunar", "temp.lunar", "d
 
 #calculate AIC of each model
 aictab(cand.set = models, modnames = mod.names)
-
-AIC(Gmm1$mer, Gmm1a$mer, Gmm1b$mer, Gmm1c$mer, Gmm1d$mer, Gmm1e$mer, Gmm1f$mer, Gmm2$mer)
-BIC(Gmm1$mer, Gmm1a$mer, Gmm1b$mer, Gmm1c$mer, Gmm1d$mer, Gmm1e$mer, Gmm1f$mer, Gmm2$mer)
-
 summary(Gmm1f$gam)
-anova(Gmm1f$gam)
-plot.gam(Gmm1f$gam, page=1)
-res <- residuals(Gmm1f$gam, type="deviance")
-plot(res)
 
-```
+# compare the best fitting model gamm against the gam
+full_model <-   gamm4(fresh ~ s(day) + s(lunar_illum) + temp,
+    random = ~ (1 | cluster),
+    offset(body),
+    family = binomial(link = "cloglog"),
+    data = bites)
 
-#AUC
-```{r AUC}
-gamm_df <- data.frame(fresh, temp, cluster, day, body, lunar_illum)
+reduced_mdel <- gam(fresh ~ s(day) + s(lunar_illum) + temp,
+    offset(body),
+    family = binomial(link = "cloglog"),
+    data = bites)
 
-# Generate AUC
-prob <- predict(Gmm1f$gam, newdata = gamm_df, type = "response")
-prob <- as.data.frame(prob)
-pred <- prediction(prob, gamm_df$fresh)
-perf <- performance(pred, measure = "tpr", x.measure = "fpr")
-plot(perf, axis = T)
+# Extract log-likelihoods
+logLik_full <- logLik(full_model$mer)
+logLik_reduced <- logLik(reduced_mdel)
 
-auc <- performance(pred, measure = "auc")
-auc <- auc@y.values[[1]]
-auc  #0.584
+# Perform likelihood ratio test
+lr_stat <- -2 * (logLik_reduced - logLik_full)
+p_value <- pchisq(lr_stat, df = 1, lower.tail = FALSE)
 
-# make it look nicer
-data.frame(x = perf@x.values[[1]],
-           y = perf@y.values[[1]]) %>% 
-  ggplot(aes(x, y))+
-    geom_abline(slope = 1, intercept = 0,
-              linetype = "dotted",
-              size = 1)+
-  geom_path(colour = "#e50083",
-            size = 1)+
-  theme_classic()+
-  labs(x = "1 - Specificity",
-       y = "Sensitivity")
+# Summary of the full model to check variance component
+summary_full_model <- summary(full_model$mer)
 
-# Calculate optimal cutoff
-cutoff <- optimalCutoff(gamm_df$fresh, prob$prob, "Both")
+# Extract variance component for the random effect
+variance_random_effect <- summary_full_model$varcor$cluster[1,1]
+std_dev_random_effect <- sqrt(variance_random_effect)
 
-# Generate confusion matrix
-caret::confusionMatrix(data = factor(prob$prob > cutoff), factor(gamm_df$fresh == 1),
-                positive = "TRUE")
+# Confidence intervals for the variance component
+conf_intervals <- confint(full_model$mer)
+str(conf_intervals)
+# Extract the confidence intervals for the variance component of the random effect
+# Identify the row name corresponding to the random effect (assuming ".sig01" is the one)
+confint_random_effect <- conf_intervals[".sig01", ]
+
+# Print results
+cat("Variance component for random effect (cluster):", variance_random_effect, "\n")
+cat("Standard deviation for random effect (cluster):", std_dev_random_effect, "\n")
+cat("Likelihood Ratio Test Statistic:", lr_stat, "\n")
+cat("p-value:", p_value, "\n")
+cat("95% Confidence Interval for variance component:", confint_random_effect, "\n")
+cat("AIC for full model:", AIC(full_model$mer), "\n")
+cat("AIC for reduced model:", AIC(reduced_mdel), "\n")
+
+##### ## looking for peaks in data ######
+# preidctions
+# Generate new data for prediction
+newdata <- data.frame(
+  temp = mean(temp),  # Keep temp constant, you may choose another value or a sequence
+  day = seq(min(day), max(day), length.out = 365),  # Julian days for a year
+  cluster = unique(cluster)[1],  # Choose one cluster for prediction
+  body = mean(body),  # Average body offset
+  lunar_illum = seq(min(lunar_illum), max(lunar_illum), length.out = 365)  # Sequence of lunar illumination
+)
+
+# Predict with standard errors
+predictions.new <- predict(Gmm1f$gam, newdata, type = "response", se.fit = TRUE)
+
+# Calculate 95% confidence intervals
+predictions.new$upper <- predictions.new$fit + 1.96 * predictions.new$se.fit
+predictions.new$lower <- predictions.new$fit - 1.96 * predictions.new$se.fit
+
+# Combine predictions with newdata
+prediction_data <- data.frame(
+  day = newdata$day,
+  fit = predictions.new$fit,
+  upper = predictions.new$upper,
+  lower = predictions.new$lower
+)
+
+# Function to identify peaks
+find_peaks <- function(x) {
+  peaks <- which(diff(sign(diff(x))) == -2) + 1
+  return(peaks)
+}
+
+# Identify peaks in predictions
+peaks <- find_peaks(prediction_data$fit)
+# Extract peak details
+peak_details <- prediction_data[peaks, ]
+
+# Calculate SE from upper and lower bounds
+peak_details$se_upper <- (peak_details$upper - peak_details$fit) / 1.96
+peak_details$se_lower <- (peak_details$fit - peak_details$lower) / 1.96
+
+# Check if the SE values are similar
+peak_details$se <- apply(peak_details[, c("se_upper", "se_lower")], 1, mean)
+
+# Display peak details
+peak_details
+
+# Plot with peaks highlighted
+ggplot(prediction_data, aes(x = day, y = fit)) +
+  geom_line(color = "blue") +
+  geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.2) +
+  geom_point(data = peak_details, aes(x = day, y = fit), color = "red", size = 3) +
+  labs(x = "Julian day of the year", y = "Predicted Presence/Absence of fresh bites", title = "GAMM Predictions with 95% CI") +
+  theme_minimal()
 ```
 
 #CV
 ```{r Cross-validation}
+# Set a cutoff value for classification
+cutoff <- 0.5
 # Split data
 fold_index <- createFolds(fresh)
 
@@ -660,7 +710,7 @@ sd(mse_total)
 ```{r model results plots}
 
 names(bites)
-#Gmm2 <-   gamm4(fresh ~ temp + s(day) + s(lunar_illum, k = 8),random = ~ (1 | cluster), offset(body), amily = binomial(link = "cloglog"), data = bites )  
+#Gmm1f <-   gamm4(fresh ~ s(day) + s(lunar_illum) + temp, random = ~ (1 | cluster), offset(body), family = binomial(link = "cloglog"),     data = bites) 
 
 new.data.SST <- with(bites, expand.grid(temp = seq(min(temp), max(temp), length = 200),
                                 day = mean(day),
