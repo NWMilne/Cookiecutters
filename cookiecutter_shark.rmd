@@ -1,0 +1,1094 @@
+---
+title: "Cookiecutters"
+output: html_document
+date: '2022-07-14'
+editor_options: 
+  chunk_output_type: console
+---
+
+## R packages 
+```{r Packages,message=FALSE,warning=FALSE}
+rm(list=ls())
+library(sf)
+library(mgcv)
+library(gamm4)
+library(lunar)
+library(dplyr)
+library(tidyverse)
+require(ggplot2)
+library(EnvStats)
+library(tidyr)
+library(gratia)
+library(ROCR)
+library(caret)
+library(InformationValue)
+library(Metrics)
+library(foreach)
+library(utils.add)
+
+```
+
+#Data
+```{r load in data}
+
+bites<-read.csv("CC_bite_data_revision.csv", header=TRUE)
+names(bites)
+class(bites$Catalogue.ID)
+bites$Catalogue.ID <- as.factor(bites$Catalogue.ID)
+bites$Social.cluster <- as.factor(bites$Social.cluster)
+str(bites)
+```
+
+#data exploration
+```{r lunar data}
+
+### data explroations ####
+# get correct date format
+
+bites <- bites %>%
+  mutate(Full.Date = as.Date(Full.Date, format = "%d/%m/%Y"),  # Convert date
+    Bite.Confirmed.Logic = case_when(
+      Bite.Confirmed == "Yes" ~ TRUE,    # Convert "Yes" to TRUE
+      Bite.Confirmed == "No" ~ FALSE,   # Convert "No" to FALSE
+      TRUE ~ NA),                         # Retain NA for other or missing values
+    Bite.Confirmed.Binary = case_when(
+      Bite.Confirmed == "Yes" ~ 1,      # Convert "Yes" to 1
+      Bite.Confirmed == "No" ~ 0,       # Convert "No" to 0
+      TRUE ~ NA))                         # Retain NA for other or missing values
+
+summary_stats <- bites %>%
+  summarise(total_whales = n_distinct(Catalogue.ID),
+    total_encounters = n_distinct(Group.code),
+    total_sightings = n(),
+    avg_healing_bites = mean(Total.healing.bites, na.rm = TRUE),
+    avg_scarred_bites = mean(Total.Scarred.bites, na.rm = TRUE),
+    percent_with_fresh_bites = mean(Fresh.bite, na.rm = TRUE) * 100)
+print(summary_stats)
+
+fresh_bite_summary <- bites %>%
+  summarise(
+    total_fresh_bites = sum(Fresh.bite, na.rm = TRUE),
+    percent_fresh_bites = mean(Fresh.bite, na.rm = TRUE) * 100)
+fresh_bite_summary
+
+bite_totals <- bites %>%
+  summarise(
+    avg_healing_bites = mean(Total.healing.bites, na.rm = TRUE),
+    se_avg_healing_bites = sd(Total.healing.bites, na.rm = TRUE) / sqrt(n()),
+    avg_scarred_bites = mean(Total.Scarred.bites, na.rm = TRUE),
+    se_avg_healing_bites = sd(Total.Scarred.bites, na.rm = TRUE) / sqrt(n()),
+    max_healing_bites = max(Total.healing.bites, na.rm = TRUE),
+    max_scarred_bites = max(Total.Scarred.bites, na.rm = TRUE))
+print(bite_totals)
+
+fresh_bite_ids <- bites %>%
+  filter(Fresh.bite == 1) %>%
+  group_by(Catalogue.ID) %>%
+  summarise(total_fresh_bites = sum(Fresh.bite, na.rm = TRUE)) %>%
+  ungroup()
+
+total_unique_ids_with_fresh_bites <- nrow(fresh_bite_ids)
+print(total_unique_ids_with_fresh_bites)
+
+fresh_bite_distribution <- fresh_bite_ids %>%
+  count(total_fresh_bites)
+
+# fresh bite per individual
+unique_fresh_bites <- bites %>%
+  filter(Total.fresh.bites > 0) %>%  # Include only rows with Total.fresh.bites > 0
+  group_by(Catalogue.ID) %>%
+  summarise(max_fresh_bites = max(Total.fresh.bites, na.rm = TRUE)) %>%  # Get max fresh bites per ID
+  mutate(category = case_when(
+      max_fresh_bites == 1 ~ "single",
+      max_fresh_bites == 2 ~ "double",
+      max_fresh_bites == 3 ~ "triple",
+      TRUE ~ "other"))
+
+fresh_bite_summary <- unique_fresh_bites %>%
+  count(category) %>%
+  rename(count_of_individuals = n)
+fresh_bite_summary
+
+#healing bites per individual
+unique_heal_bites <- bites %>%
+  filter(Total.healing.bites > 0) %>%  # Include only rows with Total.fresh.bites > 0
+  group_by(Catalogue.ID) %>%
+  summarise(max_heal_bites = max(Total.healing.bites, na.rm = TRUE)) %>%  # Get max fresh bites per ID
+  mutate(category = case_when(
+      max_heal_bites == 1 ~ "single",
+      max_heal_bites == 2 ~ "double",
+      max_heal_bites == 3 ~ "triple",
+      max_heal_bites == 4 ~ "quad",
+      max_heal_bites == 5 ~ "cinq",
+      max_heal_bites == 6 ~ "six",
+      TRUE ~ "other"))
+
+heal_bite_summary1 <- unique_heal_bites %>%
+  count(category) %>%
+  rename(count_of_individuals = n)
+heal_bite_summary1
+
+heal_bite_summary2 <- bites %>%
+  filter(Total.healing.bites > 0) %>%  # Include only rows with healing bites
+  summarise(total_healing_bites = sum(Total.healing.bites, na.rm = TRUE), 
+    unique_individuals = n_distinct(Catalogue.ID),               
+    total_identification = n(),                                       
+    unique_encounters = n_distinct(Group.code))
+heal_bite_summary2
+
+#scarred bites per individual
+unique_scar_bites <- bites %>%
+  filter(Total.Scarred.bites > 0) %>%  # Include only rows with Total.fresh.bites > 0
+  group_by(Catalogue.ID) %>%
+  summarise(max_scar_bites = max(Total.Scarred.bites, na.rm = TRUE)) %>%  # Get max fresh bites per ID
+  mutate(category = case_when(
+      max_scar_bites == 1 ~ "one",
+      max_scar_bites == 2 ~ "two",
+      max_scar_bites == 3 ~ "three",
+      max_scar_bites == 4 ~ "four",
+      max_scar_bites == 5 ~ "five",
+      max_scar_bites == 6 ~ "six",
+      max_scar_bites == 7 ~ "seven",
+      max_scar_bites == 8 ~ "eight",
+      max_scar_bites == 9 ~ "nine",
+      max_scar_bites == 10 ~ "10",
+      max_scar_bites > 10 ~ "greater than 10",
+      TRUE ~ "other"))
+
+scar_bite_summary1 <- unique_scar_bites %>%
+  count(category) %>%
+  rename(count_of_individuals = n)
+scar_bite_summary1
+
+scar_bite_summary <- bites %>%
+  filter(Total.Scarred.bites > 0) %>%  # Include only rows with healing bites
+  summarise(Total.Scarred.bites = sum(Total.Scarred.bites, na.rm = TRUE), 
+    unique_individuals = n_distinct(Catalogue.ID),               
+    total_identification = n(),                                       
+    unique_encounters = n_distinct(Group.code))
+scar_bite_summary
+
+# Time trends for fresh bites
+fresh_bite_trends <- bites %>%
+  group_by(Full.Date) %>%
+  summarise(
+    fresh_bite_count = sum(Fresh.bite, na.rm = TRUE),
+    avg_healing_bites = mean(Total.healing.bites, na.rm = TRUE))
+fresh_bite_trends
+
+fresh_bites <- bites %>%
+  filter(Fresh.bite == 1)
+
+first_fresh_bites <- fresh_bites %>%
+  group_by(Catalogue.ID) %>%
+  summarise(first_fresh_date = min(Full.Date, na.rm = TRUE)) %>%
+  ungroup()
+first_fresh_bites
+
+subsequent_resightings <- bites %>%
+  inner_join(first_fresh_bites, by = "Catalogue.ID") %>%
+  filter(Full.Date >= first_fresh_date)
+subsequent_resightings
+
+subsequent_resightings <- subsequent_resightings %>%
+  mutate(sighting_type = ifelse(Full.Date == first_fresh_date, "First Fresh Bite", "Resighting"))
+subsequent_resightings
+
+subsequent_resightings2 <- subsequent_resightings %>%
+  filter(Bite.Confirmed == 1 | Fresh.bite == 1 | Total.healing.bites > 0 | Total.Scarred.bites > 0)
+
+subsequent_resightings2 <- subsequent_resightings2 %>%
+  mutate(sighting_type = ifelse(Full.Date == first_fresh_date, "First Fresh Bite", "Resighting"))
+
+# Compare with the first sighting's Location
+subsequent_resightings2 <- subsequent_resightings2 %>%
+  group_by(Catalogue.ID) %>%
+  mutate(same_location = Location == first(Location))  
+
+# Compare with the first sighting's side
+subsequent_resightings2 <- subsequent_resightings2 %>%
+  group_by(Catalogue.ID) %>%
+  mutate(
+    same_side = Sides.of.body.seen == first(Sides.of.body.seen))  
+
+bite_summary <- subsequent_resightings2 %>%
+  group_by(sighting_type) %>%
+  summarise(total_sightings = n(),
+    confirmed_bites = sum(Bite.Confirmed.Logic, na.rm = TRUE),
+    same_location_count = sum(same_location, na.rm = TRUE),
+    same_side_count = sum(same_side, na.rm = TRUE),
+    percent_same_location = (same_location_count / total_sightings) * 100,
+    percent_same_side = (same_side_count / total_sightings) * 100)
+bite_summary
+
+resighting_summary <- subsequent_resightings %>%
+  group_by(Catalogue.ID) %>%
+  summarise(total_resightings = n() - 1)
+resighting_summary
+
+resighting_table <- resighting_summary %>%
+  summarise(min_frequency = min(total_resightings, na.rm = TRUE),
+    max_frequency = max(total_resightings, na.rm = TRUE),
+    mean_frequency = mean(total_resightings, na.rm = TRUE),
+    se_frequency = sd(total_resightings, na.rm = TRUE) / sqrt(n()),
+    total_individuals = n_distinct(Catalogue.ID),
+    resighted_individuals = sum(total_resightings > 0, na.rm = TRUE),
+    percent_resighted = (resighted_individuals / total_individuals) * 100)
+resighting_table
+
+ggplot(subsequent_resightings, aes(x = Full.Date, y = Catalogue.ID)) +
+  geom_point(aes(color = sighting_type), size = 2) +
+  labs(title = "Timeline of Fresh Bites and Resightings",
+       x = "Date",
+       y = "Catalogue ID",
+       color = "Sighting Type") +
+  theme_minimal() +
+  theme(axis.text.y = element_text(size = 6))
+
+### resighting analysis
+# Ensure we only consider resightings
+resightings_analysis <- subsequent_resightings %>%
+  filter(sighting_type == "Resighting")
+
+# Compare sides of the body between first fresh bite and resightings
+same_side_analysis <- resightings_analysis %>%
+  group_by(Catalogue.ID) %>%
+  summarise(
+    same_side_seen = sum(Sides.of.body.seen == first(Sides.of.body.seen), na.rm = TRUE),
+    total_resightings = n(),
+    percent_same_side = (same_side_seen / total_resightings) * 100)
+print(same_side_analysis)
+
+# Compare bite locations between first fresh bite and resightings
+same_location_analysis <- resightings_analysis %>%
+  group_by(Catalogue.ID) %>%
+  summarise(
+    same_location_seen = sum(Location == first(Location), na.rm = TRUE),
+    total_resightings = n(),
+    percent_same_location = (same_location_seen / total_resightings) * 100)
+print(same_location_analysis)
+
+combined_analysis <- resightings_analysis %>%
+  group_by(Catalogue.ID) %>%
+  summarise(
+    same_side_seen = sum(Sides.of.body.seen == first(Sides.of.body.seen), na.rm = TRUE),
+    percent_same_side = (same_side_seen / n()) * 100,
+    same_location_seen = sum(Location == first(Location), na.rm = TRUE),
+    percent_same_location = (same_location_seen / n()) * 100,
+    total_resightings = n())
+print(combined_analysis, n=106)
+
+location_table <- combined_analysis %>%
+  summarise(min_same_location = min(same_location_seen, na.rm = TRUE),
+    max_same_location = max(same_location_seen, na.rm = TRUE),
+    mean_same_location = mean(same_location_seen, na.rm = TRUE),
+    se_same_location = sd(same_location_seen, na.rm = TRUE) / sqrt(sum(!is.na(same_location_seen))),
+    min_percent_same_location = min(percent_same_location, na.rm = TRUE),
+    max_percent_same_location = max(percent_same_location, na.rm = TRUE),
+    mean_percent_same_location = mean(percent_same_location, na.rm = TRUE),
+    se_percent_same_location = sd(percent_same_location, na.rm = TRUE) / sqrt(sum(!is.na(percent_same_location))))
+location_table
+
+side_table <- combined_analysis %>%
+  summarise(min_same_side = min(same_side_seen, na.rm = TRUE),
+    max_same_side = max(same_side_seen, na.rm = TRUE),
+    mean_same_side = mean(same_side_seen, na.rm = TRUE),
+    se_same_side = sd(same_side_seen, na.rm = TRUE) / sqrt(sum(!is.na(same_location_seen))),
+    min_percent_same_side = min(percent_same_side, na.rm = TRUE),
+    max_percent_same_side = max(percent_same_side, na.rm = TRUE),
+    mean_percent_same_side = mean(percent_same_side, na.rm = TRUE),
+    se_percent_side = sd(percent_same_side, na.rm = TRUE) / sqrt(sum(!is.na(percent_same_side))))
+side_table
+
+### lunar data ####
+names(bites)
+str(bites)
+#lunar phases categorical
+lunar.phase(as.Date(bites$Full.Date), shift =-10, name= 8)
+bites$lunar.phase <- lunar.phase(as.Date(bites$Full.Date), shift =-10, name= 8)
+
+# need to combine the 8 phases with similar light levels as per (Owen 2019)
+# eg waxing & waning gibbous - gibbous, waxing & waning crescent - crescent 
+
+levels(bites$lunar.phase)
+bites$lunar.phase <- recode_factor(bites$lunar.phase, "Waxing crescent" = "Crescent",
+                                   "Waning crescent" = "Crescent",
+                                   "Waxing gibbous" = "Gibbous",
+                                   "Waning gibbous" = "Gibbous",
+                                   "First quarter" = "Quarter",
+                                   "Last quarter" = "Quarter")
+
+#lunar illumination
+lunar.illumination(as.Date(bites$Full.Date), shift =-10)
+bites$lunar.illumin <- lunar.illumination(as.Date(bites$Full.Date), shift =-10)
+
+# how many unique sightings
+bites %>% summarise(count = n_distinct(Catalogue.ID))    
+
+#sll data sightings by season 
+sight_agg <- bites %>%  ## Create a new data frame
+  group_by(Season) %>%  ## group this data by the "Season" variable
+  summarise_at(vars(Fresh.bite), list(Fresh.bite_total = ~sum(., na.rm=TRUE)))
+sight_agg
+
+## little thing to see also how many sightings per season as well
+encounters_per_season <- bites %>% 
+  group_by(Season) %>% 
+  summarise(n_catalogue_id = length(unique(Catalogue.ID)),
+            n_encounter_number = length(unique(Encounter.number)),
+            total_bites = sum(Fresh.bite))
+encounters_per_season
+
+# fresh bites per encounter per month across all years
+encounters_per_month <- bites %>% 
+  group_by(Date.month) %>% 
+  summarise(n_catalogue_id = length(unique(Catalogue.ID)),
+            n_encounter_number = length(unique(Encounter.number)),
+            total_bites = sum(Fresh.bite))
+encounters_per_month
+
+#breakdown by month 
+bites %>%
+  group_by(Date.month) %>%
+  summarise(
+    n_individuals = length(unique(Catalogue.ID)),
+    n_encounter_number = length(unique(Encounter.number)),
+    count = n()
+  )
+
+# same agian for lunar phase
+encounters_per_lunar <- bites %>% 
+  group_by(lunar.phase) %>% 
+  summarise(n_catalogue_id = length(unique(Catalogue.ID)),
+            n_encounter_number = length(unique(Encounter.number)),
+            total_bites = sum(Fresh.bite))
+encounters_per_lunar
+
+
+# fresh bites per season
+fresh.bites <- subset(bites,Fresh.bite%in%c("1"))
+fresh.bites$Season <- as.factor(fresh.bites$Season)
+fresh.bites$Encounter.number <- as.factor(fresh.bites$Encounter.number)
+
+bites_agg.fresh <- fresh.bites %>%  ## Fresh bites per month
+  group_by(Date.month) %>%  
+  summarise_at(vars(Fresh.bite), list(Fresh.bite_total = ~sum(., na.rm=TRUE)))
+bites_agg.fresh
+
+#breakdown of fresh bites
+fresh_bites_details <- fresh.bites %>%
+  summarise(n_individuals = length(unique(Catalogue.ID)),
+            n_encounter_number = length(unique(Encounter.number)),
+            total_bites = sum(Total.fresh.bites),
+            count = n())
+fresh_bites_details
+
+# more than one
+numerous  <- filter(fresh.bites, Total.fresh.bites > 1)
+
+bites %>% 
+  group_by(Date.month) %>% # avg SST
+ summarize(avg=mean(surface.water.temp), n=n(), sd=sd(surface.water.temp), se=sd/sqrt(n))
+
+bites_agg <- fresh.bites %>%  
+  group_by(Season) %>%  ## group this data by the "Season" variable
+  summarise_at(vars(Fresh.bite), list(Fresh.bite_total = ~sum(., na.rm=TRUE)))
+bites_agg
+
+bites_agg2 <- fresh.bites %>% 
+  group_by(lunar.phase) %>%  ## group this data by the "lunar phase" variable
+  summarise_at(vars(Fresh.bite,Total.fresh.bites), list(total = ~sum(., na.rm=TRUE)))
+bites_agg2
+
+bites_agg3 <- bites %>%  
+  group_by(Season) %>%  ## group this data by the "Season" variable
+  summarise_at(vars(Total.fresh.bites), list(mean = ~mean(., na.rm=TRUE)))
+bites_agg3
+
+## little thing to see also how many sightings per season as well
+bites_agg.sightings <- bites %>%  ## Create a new data frame
+group_by(Season) %>%
+   mutate(n_sighting_distinct = n_distinct(Encounter.number)) %>% 
+   summarise_at(vars(n_sighting_distinct, Fresh.bite), .funs = c(sum="sum"))
+bites_agg.sightings
+
+bites_per_season <- bites %>% 
+  group_by(Season) %>% 
+  summarise(n_catalogue_id = length(unique(Catalogue.ID)),
+            n_encounter_number = length(unique(Encounter.number)),
+            total_bites = sum(Fresh.bite))
+bites_per_season
+
+bites_per_lunar <- bites %>% 
+  group_by(lunar.phase) %>% 
+  summarise(n_catalogue_id = length(unique(Catalogue.ID)),
+            n_encounter_number = length(unique(Encounter.number)),
+            total_bites = sum(Fresh.bite))
+bites_per_lunar
+
+str(fresh.bites)
+
+#healing bites subset
+heal.bites <- bites %>%
+  filter_at(vars(Total.healing.bites), any_vars(. > 0))
+
+# heal bites per encounter per month across all years
+heal_per_month <- heal.bites %>% 
+  group_by(Date.month) %>% 
+  summarise(n_catalogue_id = length(unique(Catalogue.ID)),
+            n_encounter_number = length(unique(Encounter.number)),
+            total_bites = sum(Total.healing.bites))
+heal_per_month
+
+#scar bites subset
+scar.bites <- bites %>%
+  filter_at(vars(Total.Scarred.bites), any_vars(. > 0))
+
+
+# scar bites per encounter per month across all years
+scar_per_month <- scar.bites %>% 
+  group_by(Date.month) %>% 
+  summarise(n_catalogue_id = length(unique(Catalogue.ID)),
+            n_encounter_number = length(unique(Encounter.number)),
+            total_bites = sum(Total.Scarred.bites))
+scar_per_month
+
+encounters_per_season
+#plot these - season sightings
+level_order1 <- factor(encounters_per_season$Season, level = c("Autumn", "Winter", "Spring", "Summer"))
+E1 <- ggplot(encounters_per_season, aes(x = level_order1, y = n_catalogue_id, label = n_catalogue_id ))
+E1
+E1a <- E1 + geom_point(shape = 17, size =4) + geom_text(hjust=0.05, vjust=-1.25, size = 4) +
+    xlab("Season")+
+    ylim(0, 400) +
+    theme_bw() +
+    theme(legend.position = "none")+
+    theme(panel.grid.major = element_blank(), 
+          panel.grid.minor = element_blank(),
+          axis.title.y=element_blank()) 
+E1a
+
+encounters_per_lunar
+#plot these - lunar sightings
+level_order2 <- factor(encounters_per_lunar$lunar.phase, level = c("Full", "Gibbous", "Quarter", "Crescent", "New"))
+L1 <- ggplot(encounters_per_lunar, aes(x = level_order2, y = n_catalogue_id, label = n_catalogue_id ))
+L1
+L1a <- L1 + geom_point(shape = 19, size =4) + geom_text(hjust=0.05, vjust=-1.25, size = 4) +
+    xlab("Lunar Phase")+
+    ylim(0, 400) +
+    theme_bw() +
+    theme(legend.position = "none")+
+    theme(panel.grid.major = element_blank(), 
+          panel.grid.minor = element_blank(),
+          axis.title.y=element_blank()) 
+L1a
+
+
+bites_per_season
+#plot these - season sightings
+bites$Date.month <- factor(bites$Date.month, levels = c("January", "February", "March", 
+                                                        "April", "May", "June", "July", 
+                                                        "August", "September", "October", 
+                                                        "November", "December"))
+
+level_order1 <- factor(bites_per_season$Season, level = c("Autumn", "Winter", "Spring", "Summer"))
+g2 <- ggplot(bites_per_season, aes(x = level_order1, y = n_catalogue_id, label = n_catalogue_id ))
+g2
+g2a <- g2 + geom_point(shape = 17, size =4) + geom_text(hjust=0.05, vjust=-1.25, size = 4) +
+    xlab("Season")+
+    ylim(0, 400) +
+    theme_bw() +
+    theme(legend.position = "none")+
+    theme(panel.grid.major = element_blank(), 
+          panel.grid.minor = element_blank(),
+          axis.title.y=element_blank()) 
+g2a
+
+bites_per_lunar
+#plot these - lunar sightings
+level_order2 <- factor(bites_per_lunar$lunar.phase, level = c("Full", "Gibbous", "Quarter", "Crescent", "New"))
+g3 <- ggplot(bites_per_lunar, aes(x = level_order2, y = n_catalogue_id, label = n_catalogue_id ))
+g3
+g3a <- g3 + geom_point(shape = 19, size =4) + geom_text(hjust=0.05, vjust=-1.25, size = 4) +
+    xlab("Lunar Phase")+
+    ylab("Total sightings")+
+    ylim(0, 400) +
+    theme_bw() +
+    theme(legend.position = "none")+
+    theme(panel.grid.major = element_blank(), 
+          panel.grid.minor = element_blank(),
+          axis.title.y=element_blank()) 
+g3a
+
+
+#plot these - season bites
+level_order3 <- factor(bites_agg$Season, level = c("Autumn", "Winter", "Spring", "Summer"))
+g <- ggplot(bites_agg, aes(x = level_order3, y = Fresh.bite_total, label = Fresh.bite_total))
+g1 <- g + geom_point(shape = 17, size =4) + geom_text(hjust=0.05, vjust=-1.25, size = 4) +
+    xlab("Season")+
+    ylim(0, 60) +
+    theme_bw() +
+    theme(legend.position = "none")+
+    theme(panel.grid.major = element_blank(), 
+          panel.grid.minor = element_blank(),
+          axis.title.y=element_blank()) 
+g1
+
+# Bites per lunar phase
+bites_per_lunar_phase <- bites %>% 
+  group_by(lunar.phase) %>% 
+  summarise(n_catalogue_id = length(unique(Catalogue.ID)),
+            n_encounter_number = length(unique(Encounter.number)),
+            total_bites = sum(Fresh.bite))
+
+#plot these - lunar bites
+level_order4 <- factor(bites_agg2$lunar.phase, level = c("Full", "Gibbous", "Quarter", "Crescent", "New"))
+L <- ggplot(bites_agg2, aes(x = level_order2, y = Fresh.bite_total, label = Fresh.bite_total))
+L1 <- L + geom_point(shape = 19, size =4) + geom_text(hjust=0.05, vjust=-1.25, size=4) +
+    xlab("Lunar Phase")+
+    ylab("Total fresh bites")+
+    ylim(0, 60) +
+    theme_bw() +
+    theme(legend.position = "none")+
+    theme(panel.grid.major = element_blank(), 
+          panel.grid.minor = element_blank())
+L1
+
+## try barcharts not points
+# Value used to transform the data doiuble axis
+bites_agg2
+bites_agg.copy <- bites_agg2
+names(bites_agg.copy)[names(bites_agg.copy) == "Fresh.bite_total"] <- "y"
+names(bites_agg.copy)[names(bites_agg.copy) == "lunar.phase"] <- "x"
+bites_agg.copy
+bites_agg.copy <-bites_agg.copy %>% select(y, x )
+bites_agg.copy$z <- "data1"
+
+bites_per_lunar
+bites_per_lunar.copy <- bites_per_lunar
+bites_per_lunar.copy
+names(bites_per_lunar.copy)[names(bites_per_lunar.copy) == "n_encounter_number"] <- "y"
+names(bites_per_lunar.copy)[names(bites_per_lunar.copy) == "lunar.phase"] <- "x"
+bites_per_lunar.copy <-bites_per_lunar.copy %>% select(y, x )
+bites_per_lunar.copy$z <- "data2"
+
+#d3 <- within(bites_per_lunar.copy, { y = log2(y) })
+d4 <- rbind(bites_agg.copy, bites_per_lunar.copy)
+d4
+
+#calculate ratio between bites and encounters
+bites_per_lunar_phase
+bites_per_lunar_phase <- bites_per_lunar_phase %>%
+        mutate(ratio = total_bites/n_catalogue_id )
+  bites_per_lunar_phase
+  
+bites_per_season
+bites_per_season <- bites_per_season %>%
+        mutate(ratio = total_bites/n_catalogue_id )
+bites_per_season
+  
+library(ggpubr)
+# Create a figure by combining the different plots
+sighting.results<- ggarrange(L1a,E1a,ncol = 2, nrow = 1)
+#sighting_results <- ggarrange(g3a,g2a,ncol = 2, nrow = 1)
+all_results <- ggarrange(g3a,g2a,L1,g1, ncol = 2, nrow = 2)
+
+# Annotate the figure by adding a common labels
+annotate_figure(sighting.results,
+                left = text_grob("Total sightings", color = "black", rot =90))
+
+
+annotate_figure(all_results)
+
+# use ratio of sighting to bites instead
+#plot these - lunar bites
+level_order3R <- factor(bites_per_season$Season, level = c("Autumn", "Winter", "Spring", "Summer"))
+R <- ggplot(bites_per_season, aes(x = level_order3R, y = ratio, label = round(ratio, 3)))
+R1 <- R + geom_point(shape = 19, size =4) + geom_text(hjust=0.05, vjust=-1.25, size=4) +
+    xlab("Season")+
+    ylim(0.11, 0.145) +
+    theme_bw() +
+    theme(legend.position = "none")+
+    theme(panel.grid.major = element_blank(), 
+          panel.grid.minor = element_blank(),
+          axis.title.y=element_blank())
+R1
+
+
+level_order4R <- factor(bites_per_lunar_phase$lunar.phase, level = c("Full", "Gibbous", "Quarter", "Crescent", "New"))
+R3 <- ggplot(bites_per_lunar_phase, aes(x = level_order4R, y = ratio, label = round(ratio, 3)))
+R4 <- R3 + geom_point(shape = 17, size =4) + geom_text(hjust=0.05, vjust=-1.25, size=4) +
+    xlab("Lunar Phase")+
+    ylim(0.01, 0.15) +
+    theme_bw() +
+    theme(legend.position = "none")+
+    theme(panel.grid.major = element_blank(), 
+          panel.grid.minor = element_blank(),
+          axis.title.y=element_blank()) 
+R4
+
+ratio_results <- ggarrange(R1,R4, ncol = 2, nrow = 1)
+
+annotate_figure(ratio_results,
+                left = text_grob("Ratio of sightings to fresh bites", color = "black", rot =90))
+
+
+##### should body be an offset #####
+bites_clean <- bites %>%
+  filter(!is.na(Bite.Confirmed))
+
+# Summary statistics for the percentage of body observed and presence of bites, does this need to be an offset?
+summary(bites_clean$body)
+summary(bites_clean$Bite.Confirmed)
+null_model <- glm(Fresh.bite ~ 1, family = binomial, data = bites_clean)
+visable <- glm(Fresh.bite ~ body, family = binomial, data = bites_clean)
+summary(visable)
+anova(null_model, visable, test = "Chisq")
+
+
+## SST plots
+SST.plot <- ggplot(bites, aes(x = Date.month, y = surface.water.temp, fill = Date.month)) +
+    geom_boxplot(outlier.shape = NA) +
+    stat_boxplot(geom = "errorbar") +
+    stat_summary(fun.data = mean_se, geom = "point", shape = 4, size = 8, colour = "blue", stroke = 1.5, show.legend = FALSE) +
+    scale_fill_grey() +
+    stat_n_text() +
+    theme_bw() +
+    ylab("Sea surface temperature (°C)") +
+    theme(
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        legend.position = "none",
+        axis.title.x = element_blank())
+SST.plot
+
+
+```
+
+#predict bite location
+```{r chisq for expected bites}
+str(bites)
+bites$Location <- as.factor(bites$Location)
+# Calculate expected bites based on area seen
+bites_proportions <- fresh.bites |> 
+  select(Location, Sides.of.body.seen) |> 
+  filter(Location != "none") |> 
+  group_by(Location, Sides.of.body.seen) |> 
+  summarise(n = n()) |> 
+  arrange(Sides.of.body.seen) |> 
+  group_by(Sides.of.body.seen ) |> 
+  mutate(prop = n/sum(n),
+         total = sum(n)) |> 
+  ungroup() |> 
+  mutate(exp_total = ifelse(Sides.of.body.seen == "Both", total, total * 2)) |> 
+  # Calculate expected based on area size alone
+  mutate(area = c(c(0.05,0.1,0.15,0.2) * 2,
+         c(0.05,0.1,0.15,0.2), c(0.05,0.1,0.15,0.2))) |> 
+  mutate(exp_n = round(area * exp_total)) |> 
+  group_by(Location) |> 
+  summarise(n = sum(n),
+            exp_n = sum(exp_n))
+bites_proportions
+bites_percentages <- bites_proportions |> 
+  mutate(percent_bites = (n / sum(n)) * 100)
+
+bites_percentages
+# Run chi-square test
+chisq.test(bites_proportions |> select(-Location))
+```
+
+#models
+```{r create and fit gamm}
+# This only works if pulled into seperate objects
+# Never ask me why
+fresh <- bites$Fresh.bite # response - presence/absence
+temp <- bites$surface.water.temp # explan 1
+cluster <- bites$Social.cluster # random 1
+day <- bites$Day # Julian day
+week <- bites$Week # week number
+body <- -log(bites$body)
+year <- bites$Date.year
+lunar_illum <- bites$lunar.illumin
+
+Gmm1 <-   gamm4(fresh ~ s(temp),
+    offset(body),
+        random = ~ (1 | cluster),
+    family = binomial(link = "cloglog"),
+    data = bites)
+summary(Gmm1$gam)
+anova(Gmm1$gam)
+draw(Gmm1$gam)
+
+Gmm1a <-   gamm4(fresh ~ s(day),
+        offset(body),
+            random = ~ (1 | cluster),
+        family = binomial(link = "cloglog"),
+    data = bites)
+summary(Gmm1a$gam)
+anova(Gmm1a$gam)
+draw(Gmm1a$gam)
+
+Gmm1b <-   gamm4(fresh ~ s(lunar_illum),
+        offset(body),
+            random = ~ (1 | cluster),
+        family = binomial(link = "cloglog"),
+    data = bites)
+summary(Gmm1b$gam)
+anova(Gmm1b$gam)
+draw(Gmm1b$gam)
+
+Gmm1c <-   gamm4(fresh ~ s(day) + temp,
+        offset(body),
+        random = ~ (1 | cluster),
+    family = binomial(link = "cloglog"),
+    data = bites)
+
+summary(Gmm1c$gam)
+anova(Gmm1c$gam)
+draw(Gmm1c$gam)
+
+Gmm1d <-   gamm4(fresh ~ s(day) + s(lunar_illum),
+        offset(body),
+        random = ~ (1 | cluster),
+    family = binomial(link = "cloglog"),
+    data = bites)
+
+summary(Gmm1d$gam)
+anova(Gmm1d$gam)
+draw(Gmm1d$gam)
+
+Gmm1e <-   gamm4(fresh ~ temp + s(lunar_illum),
+        offset(body),
+        random = ~ (1 | cluster),
+    family = binomial(link = "cloglog"),
+    data = bites)
+
+summary(Gmm1e$gam)
+anova(Gmm1e$gam)
+draw(Gmm1e$gam)
+
+Gmm1f <-   gamm4(fresh ~ s(day) + s(lunar_illum) + temp,
+    random = ~ (1 | cluster),
+    offset(body),
+    family = binomial(link = "cloglog"),
+    data = bites)
+
+summary(Gmm1f$gam)
+anova(Gmm1f$gam)
+draw(Gmm1f$gam)
+
+Gmm2 <- gamm4(fresh ~ temp + s(day) + s(lunar_illum, k = 8),
+    random = ~ (1 | cluster),
+    offset(body),
+    family = binomial(link = "cloglog"),
+    data = bites) 
+summary(Gmm2$gam)
+anova(Gmm2$gam)
+draw(Gmm2$gam)
+AIC(Gmm1f$mer, Gmm2$mer)
+
+
+#install.packages("AICcmodavg")
+library(AICcmodavg)
+
+#define list of models
+models <- list(Gmm1$mer, Gmm1a$mer, Gmm1b$mer, Gmm1c$mer, Gmm1d$mer, Gmm1e$mer, Gmm1f$mer)
+
+#specify model names
+mod.names <- c("temp", "day", "lunar", "day.temp", "day.lunar", "temp.lunar", "day.lunar.temp")
+
+#calculate AIC of each model
+aictab(cand.set = models, modnames = mod.names)
+BIC(Gmm1$mer, Gmm1a$mer, Gmm1b$mer, Gmm1c$mer, Gmm1d$mer, Gmm1e$mer, Gmm1f$mer)
+summary(Gmm1f$gam)
+
+# compare the best fitting model gamm against the gam
+full_model <-   gamm4(fresh ~ s(day) + s(lunar_illum) + temp,
+    random = ~ (1 | cluster),
+    offset(body),
+    family = binomial(link = "cloglog"),
+    data = bites)
+
+reduced_mdel <- gam(fresh ~ s(day) + s(lunar_illum) + temp,
+    offset(body),
+    family = binomial(link = "cloglog"),
+    data = bites)
+
+# Extract log-likelihoods
+logLik_full <- logLik(full_model$mer)
+logLik_reduced <- logLik(reduced_mdel)
+
+# Perform likelihood ratio test
+lr_stat <- -2 * (logLik_reduced - logLik_full)
+p_value <- pchisq(lr_stat, df = 1, lower.tail = FALSE)
+
+# Summary of the full model to check variance component
+summary_full_model <- summary(full_model$mer)
+
+# Extract variance component for the random effect
+variance_random_effect <- summary_full_model$varcor$cluster[1,1]
+std_dev_random_effect <- sqrt(variance_random_effect)
+residual_variance <- pi^2 / 3
+
+# Calculate ICC
+icc <- variance_random_effect / (variance_random_effect + residual_variance)
+icc
+# Confidence intervals for the variance component
+conf_intervals <- confint(full_model$mer)
+str(conf_intervals)
+# Extract the confidence intervals for the variance component of the random effect
+# Identify the row name corresponding to the random effect (assuming ".sig01" is the one)
+confint_random_effect <- conf_intervals[".sig01", ]
+
+# random effect variance
+
+
+# Print results
+cat("Variance component for random effect (cluster):", variance_random_effect, "\n")
+cat("Standard deviation for random effect (cluster):", std_dev_random_effect, "\n")
+cat("Likelihood Ratio Test Statistic:", lr_stat, "\n")
+cat("p-value:", p_value, "\n")
+cat("95% Confidence Interval for variance component:", confint_random_effect, "\n")
+cat("AIC for full model:", AIC(full_model$mer), "\n")
+cat("AIC for reduced model:", AIC(reduced_mdel), "\n")
+
+##### ## looking for peaks in data ######
+# preidctions
+# Generate new data for prediction
+newdata <- data.frame(
+  temp = mean(temp),  # Keep temp constant, you may choose another value or a sequence
+  day = seq(min(day), max(day), length.out = 365),  # Julian days for a year
+  cluster = unique(cluster)[1],  # Choose one cluster for prediction
+  body = mean(body),  # Average body offset
+  lunar_illum = seq(min(lunar_illum), max(lunar_illum), length.out = 365)  # Sequence of lunar illumination
+)
+
+# Predict with standard errors
+predictions.new <- predict(Gmm1f$gam, newdata, type = "response", se.fit = TRUE)
+
+# Calculate 95% confidence intervals
+predictions.new$upper <- predictions.new$fit + 1.96 * predictions.new$se.fit
+predictions.new$lower <- predictions.new$fit - 1.96 * predictions.new$se.fit
+
+# Combine predictions with newdata
+prediction_data <- data.frame(
+  day = newdata$day,
+  fit = predictions.new$fit,
+  upper = predictions.new$upper,
+  lower = predictions.new$lower
+)
+
+# Function to identify peaks
+find_peaks <- function(x) {
+  peaks <- which(diff(sign(diff(x))) == -2) + 1
+  return(peaks)
+}
+
+# Identify peaks in predictions
+peaks <- find_peaks(prediction_data$fit)
+# Extract peak details
+peak_details <- prediction_data[peaks, ]
+
+# Calculate SE from upper and lower bounds
+peak_details$se_upper <- (peak_details$upper - peak_details$fit) / 1.96
+peak_details$se_lower <- (peak_details$fit - peak_details$lower) / 1.96
+
+# Check if the SE values are similar
+peak_details$se <- apply(peak_details[, c("se_upper", "se_lower")], 1, mean)
+
+# Display peak details
+peak_details
+
+# Plot with peaks highlighted
+ggplot(prediction_data, aes(x = day, y = fit)) +
+  geom_line(color = "blue") +
+  geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.2) +
+  geom_point(data = peak_details, aes(x = day, y = fit), color = "red", size = 3) +
+  labs(x = "Julian day of the year", y = "Predicted Presence/Absence of fresh bites", title = "GAMM Predictions with 95% CI") +
+  theme_minimal()
+```
+
+#CV
+```{r Cross-validation}
+# Set a cutoff value for classification
+cutoff <- 0.5
+# Split data
+fold_index <- createFolds(fresh)
+
+# Loop through folds
+mse_total <- foreach(i = 1:length(fold_index),.combine = "c") %do%
+  {
+    print(i)
+    
+    # Get testing and training row indices
+    testing_rows <- fold_index[[i]]
+    training_rows <- (1:length(fresh))[-testing_rows]
+    
+    # Extract training data
+    fresh_train <- fresh[training_rows]
+    temp_train <- temp[training_rows]
+    cluster_train <- cluster[training_rows]
+    day_train <- day[training_rows]
+    body_train <- bites$body[training_rows]
+    lunar_illum_train <- lunar_illum[training_rows]
+    
+    # Build into data frame
+    gamm_df_train <-
+      data.frame(
+        fresh = fresh_train,
+        temp = temp_train,
+        cluster = cluster_train,
+        day = day_train,
+        body = body_train,
+        lunar_illum = lunar_illum_train
+      )
+    
+    # Fit model
+    gam_train <-
+      gamm4(
+        fresh ~ temp + s(day) + s(lunar_illum),
+        random = ~ (1 | cluster),
+        weights = body,
+        family = binomial(link = "cloglog"),
+        data = gamm_df_train
+      ) 
+    
+    # Extract testing data
+    fresh_test <- fresh[testing_rows]
+    temp_test <- temp[testing_rows]
+    cluster_test <- cluster[testing_rows]
+    day_test <- day[testing_rows]
+    body_test <- bites$body[testing_rows]
+    lunar_illum_test <- lunar_illum[testing_rows]
+    
+    # Build into data frame
+    gamm_df_test <-
+      data.frame(
+        fresh = fresh_test,
+        temp = temp_test,
+        cluster = cluster_test,
+        day = day_test,
+        body = body_test,
+        lunar_illum = lunar_illum_test
+      )
+    
+    # Get predictions
+    probs <- predict(gam_train$gam, gamm_df_test, type = "response") > cutoff
+    mse(gamm_df_test$fresh, probs)
+  }
+
+# Calculate RMSE and SD
+sqrt(sum(mse_total))
+sd(mse_total)
+```
+
+#Plotting models
+```{r model results plots}
+
+names(bites)
+#Gmm1f <-   gamm4(fresh ~ s(day) + s(lunar_illum) + temp, random = ~ (1 | cluster), offset(body), family = binomial(link = "cloglog"),     data = bites) 
+
+new.data.SST <- with(bites, expand.grid(temp = seq(min(temp), max(temp), length = 200),
+                                day = mean(day),
+                                lunar_illum = mean(lunar_illum)))
+
+ilink <- family(Gmm1f$gam)$linkinv
+pred.SST <- predict(Gmm1f$gam, new.data.SST, type = "link", se.fit = TRUE)
+pred.SST <- cbind(pred.SST, new.data.SST)
+pred.SST <- transform(pred.SST, lwr_ci = ilink(fit - (2 * se.fit)),
+                        upr_ci = ilink(fit + (2 * se.fit)),
+                        fitted = ilink(fit))
+
+# scale the PA bites for plotting on second axis
+bites$y2scaled <- scales::rescale(bites$Fresh.bite, range(0,0.165))
+
+SST.model.1 <- ggplot(pred.SST, aes(x = temp, y = fitted)) +
+  geom_point(data=bites, aes(x=temp, y=y2scaled)) +
+  geom_ribbon(aes(ymin = lwr_ci, ymax = upr_ci), alpha = 0.2) +
+  geom_line() + 
+  scale_y_continuous(limits=c(0,0.165),name = "Probability of fresh bite",
+  sec.axis = sec_axis(~ . * 6, name="Presence/Absence of bites"))+
+  xlab("Sea Surface Temperature (°C)") +
+  ggtitle("A") +
+  theme(panel.border = element_blank(),
+          panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank(),
+          panel.background = element_rect(fill = "white",colour = "white"),
+          axis.title.y=element_blank(),
+          axis.line = element_line(size = 0.5, colour = "black"))
+SST.model.1
+
+# scale the PA bites for plotting on second axis
+bites$y2scaled2 <- scales::rescale(bites$Fresh.bite, range(0,0.059))
+
+new.data.Day <- with(bites, expand.grid(day = seq(min(day), max(day), length = 200),
+                                temp = mean(temp),
+                                lunar_illum = mean(lunar_illum)))
+
+ilink <- family(Gmm1f$gam)$linkinv
+pred.Day <- predict(Gmm1f$gam, new.data.Day, type = "link", se.fit = TRUE)
+pred.Day <- cbind(pred.Day, new.data.Day)
+pred.Day <- transform(pred.Day, lwr_ci = ilink(fit - (2 * se.fit)),
+                        upr_ci = ilink(fit + (2 * se.fit)),
+                        fitted = ilink(fit))
+
+Day.model.1 <- ggplot(pred.Day, aes(x = day, y = fitted)) +
+  geom_ribbon(aes(ymin = lwr_ci, ymax = upr_ci), alpha = 0.2) +
+  geom_line() + 
+  scale_y_continuous(limits=c(0,0.06),name = "Probability of fresh bite",
+  sec.axis = sec_axis(~.*17, name="Presence/Absence of bites"))+
+  geom_point(data=bites, aes(x=day, y=y2scaled2)) +
+  xlab("Ordinal Date") +
+  ggtitle("B") +
+  theme(panel.border = element_blank(),
+          panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank(),
+          panel.background = element_rect(fill = "white",colour = "white"),
+          axis.title.y=element_blank(),
+          axis.line = element_line(size = 0.5, colour = "black"))
+Day.model.1 
+
+# scale the PA bites for plotting on second axis
+bites$y2scaled3 <- scales::rescale(bites$Fresh.bite, range(0,0.145))
+
+new.data.lunar <- with(bites, expand.grid(lunar_illum = seq(min(lunar_illum), max(lunar_illum), length = 200),
+                                temp = mean(temp),
+                                day = mean(day)))
+
+ilink <- family(Gmm1f$gam)$linkinv
+pred.lunar <- predict(Gmm1f$gam, new.data.lunar, type = "link", se.fit = TRUE)
+pred.lunar <- cbind(pred.lunar, new.data.lunar)
+pred.lunar <- transform(pred.lunar, lwr_ci = ilink(fit - (2 * se.fit)),
+                        upr_ci = ilink(fit + (2 * se.fit)),
+                        fitted = ilink(fit))
+
+
+lunar.model.1 <- ggplot(pred.lunar, aes(x = lunar_illum, y = fitted)) +
+  geom_ribbon(aes(ymin = lwr_ci, ymax = upr_ci), alpha = 0.2) +
+  geom_line() + 
+  scale_y_continuous(limits=c(0,0.155), sec.axis = sec_axis(~.*7.38, name="Presence/Absence of bites"))+
+  geom_point(data=bites, aes(x=lunar_illum, y=y2scaled3)) +
+  geom_vline(xintercept = 0.1, colour="red", linetype = "longdash")+
+  geom_vline(xintercept = 0.35, colour="red", linetype = "longdash")+
+  geom_vline(xintercept = 0.7, colour="red", linetype = "longdash")+
+  geom_vline(xintercept = 0.95, colour="red", linetype = "longdash")+
+  annotate("text", x = c(0,0.22,0.53,0.83, 0.99), y=0.155, label = c("New", "Crescent", "Quarter", "Gibbous", "Full"))+
+  xlab("Lunar illumination") +
+  ggtitle("C") +
+  theme(panel.border = element_blank(),
+          panel.grid.major = element_blank(),
+          panel.grid.minor = element_blank(),
+          panel.background = element_rect(fill = "white",colour = "white"),
+          axis.title.y=element_blank(),
+          axis.line = element_line(size = 0.5, colour = "black"))
+lunar.model.1 
+
+library(ggpubr)
+# Create a figure by combining the different plots
+model.results<- ggarrange(SST.model.1,Day.model.1,lunar.model.1, ncol = 2, nrow = 2)
+# Annotate the figure by adding a common labels
+annotate_figure(model.results,
+                left = text_grob("Probability of fresh bites", color = "black", rot =90),
+                right = text_grob("Presence/absence of fresh bites", color = "black", rot =90))
+
+```
